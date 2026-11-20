@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,10 +30,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Dashboard
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Dashboard
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -62,6 +63,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.AppLanguage
+import com.example.data.UserProfile
 import com.example.ui.MainNavTab
 import com.example.ui.OvertimeUiState
 import com.example.ui.OvertimeViewModel
@@ -150,6 +153,15 @@ fun MainAppShell(
         context.startActivity(Intent.createChooser(shareIntent, state.strings.exportCsvButton))
     }
 
+    val handleShareBrowserLinkWhatsApp: () -> Unit = {
+        shareBrowserLinkToWhatsApp(
+            context = context,
+            profile = state.profile,
+            language = state.localPrefs.language,
+            chooserTitle = state.strings.shareWhatsAppButton
+        )
+    }
+
     val isTimerRunning = state.activeOvertimeStartMillis != null
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -215,20 +227,20 @@ fun MainAppShell(
                             modifier = Modifier.testTag("nav_dashboard_button")
                         )
                         NavigationRailItem(
-                            selected = state.activeNavTab == MainNavTab.SETTINGS,
-                            onClick = { viewModel.selectNavTab(MainNavTab.SETTINGS) },
+                            selected = state.activeNavTab == MainNavTab.MEMBERS,
+                            onClick = { viewModel.selectNavTab(MainNavTab.MEMBERS) },
                             icon = {
                                 Icon(
-                                    imageVector = if (state.activeNavTab == MainNavTab.SETTINGS) {
-                                        Icons.Rounded.Settings
+                                    imageVector = if (state.activeNavTab == MainNavTab.MEMBERS) {
+                                        Icons.Rounded.Groups
                                     } else {
-                                        Icons.Outlined.Settings
+                                        Icons.Outlined.Groups
                                     },
-                                    contentDescription = state.strings.navSettings
+                                    contentDescription = state.strings.navMembers
                                 )
                             },
-                            label = { Text(state.strings.navSettings) },
-                            modifier = Modifier.testTag("nav_settings_button")
+                            label = { Text(state.strings.navMembers) },
+                            modifier = Modifier.testTag("nav_members_button")
                         )
                     }
 
@@ -238,13 +250,14 @@ fun MainAppShell(
                             viewModel = viewModel,
                             onExportCsv = handleExportCsv,
                             onShareCsv = handleShareCsv,
+                            onShareBrowserLinkWhatsApp = handleShareBrowserLinkWhatsApp,
                             onSignOut = onSignOut
                         )
                     }
                 }
             }
         } else {
-            // Mobile-First Layout with Custom Bottom Navigation Bar + Center Elevated + Button
+            // Mobile-First Layout: Dashboard | + (Catat Lembur) | Anggota (Settings moved to Top-Right)
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -255,7 +268,7 @@ fun MainAppShell(
                         isTimerRunning = isTimerRunning,
                         dashboardLabel = state.strings.navDashboard,
                         addLabel = state.strings.navAdd,
-                        settingsLabel = state.strings.navSettings,
+                        membersLabel = state.strings.navMembers,
                         onSelectTab = viewModel::selectNavTab
                     )
                 }
@@ -271,6 +284,7 @@ fun MainAppShell(
                         viewModel = viewModel,
                         onExportCsv = handleExportCsv,
                         onShareCsv = handleShareCsv,
+                        onShareBrowserLinkWhatsApp = handleShareBrowserLinkWhatsApp,
                         onSignOut = onSignOut
                     )
                 }
@@ -285,6 +299,7 @@ private fun ActiveScreenContent(
     viewModel: OvertimeViewModel,
     onExportCsv: () -> Unit,
     onShareCsv: () -> Unit,
+    onShareBrowserLinkWhatsApp: () -> Unit,
     onSignOut: () -> Unit
 ) {
     when (state.activeNavTab) {
@@ -302,7 +317,8 @@ private fun ActiveScreenContent(
                 onApproveTeamEntry = viewModel::approveEntry,
                 onRejectTeamEntry = viewModel::rejectEntry,
                 onCopyCompanyCode = { viewModel.emitFeedback(state.strings.codeCopiedMsg) },
-                onOpenSettingsToConnect = { viewModel.selectNavTab(MainNavTab.SETTINGS) },
+                onOpenSettings = viewModel::openSettings,
+                onOpenSettingsToConnect = viewModel::openSettings,
                 onScanQrToJoin = viewModel::connectViaScannedQrCode,
                 onDismissNewMemberAlert = viewModel::dismissNewMemberAlert
             )
@@ -311,21 +327,94 @@ private fun ActiveScreenContent(
             AddOvertimeScreen(
                 state = state,
                 onNavigateBack = { viewModel.selectNavTab(MainNavTab.DASHBOARD) },
+                onOpenSettings = viewModel::openSettings,
                 onStartLiveTimer = viewModel::startLiveOvertimeTimer,
                 onCancelLiveTimer = viewModel::cancelLiveOvertimeTimer,
                 onStopAndSaveLiveTimer = viewModel::stopAndSaveLiveOvertime,
                 onSaveManual = viewModel::saveOvertimeEntry
             )
         }
+        MainNavTab.MEMBERS -> {
+            MembersScreen(
+                state = state,
+                onNavigateBack = { viewModel.selectNavTab(MainNavTab.DASHBOARD) },
+                onOpenSettings = viewModel::openSettings,
+                onScanQrToJoin = viewModel::connectViaScannedQrCode,
+                onCopyCompanyCode = { viewModel.emitFeedback(state.strings.codeCopiedMsg) },
+                onInviteViaWhatsApp = onShareBrowserLinkWhatsApp,
+                onPromoteToAdmin = viewModel::promoteMemberToAdmin,
+                onDemoteToMember = viewModel::demoteAdminToMember
+            )
+        }
         MainNavTab.SETTINGS -> {
             SettingsScreen(
                 state = state,
-                onNavigateBack = { viewModel.selectNavTab(MainNavTab.DASHBOARD) },
+                onNavigateBack = viewModel::navigateBackFromSettings,
                 onSaveProfileAndCompany = viewModel::saveProfileAndCompany,
                 onSelectTheme = viewModel::setThemeMode,
                 onSelectLanguage = viewModel::setLanguage,
+                onShareBrowserLinkWhatsApp = onShareBrowserLinkWhatsApp,
+                onBrowserLinkCopied = { viewModel.emitFeedback(state.strings.linkCopiedMsg) },
                 onSignOut = onSignOut
             )
+        }
+    }
+}
+
+private fun shareBrowserLinkToWhatsApp(
+    context: Context,
+    profile: UserProfile,
+    language: AppLanguage,
+    chooserTitle: String
+) {
+    val browserUrl = UserProfile.BROWSER_APP_URL
+    val message = if (language == AppLanguage.INDONESIAN) {
+        buildString {
+            appendLine("Halo! Yuk gabung ke *Absen Lemburku* untuk mencatat & memantau jam lembur tim secara real-time.")
+            appendLine()
+            appendLine("🌐 Buka lewat Browser (Android / iOS / PC):")
+            appendLine(browserUrl)
+            if (profile.isConnectedToCompany) {
+                appendLine()
+                val companyDisplay = profile.companyName.ifBlank { profile.companyCode }
+                appendLine("🏢 Perusahaan: *$companyDisplay*")
+                appendLine("🔑 Kode Perusahaan: *${profile.companyCode}*")
+                appendLine("Login dengan Google lalu masukkan Kode Perusahaan di atas pada menu Pengaturan → Profil & Koneksi Perusahaan.")
+            }
+        }.trim()
+    } else {
+        buildString {
+            appendLine("Hi! Join *Absen Lemburku* to track and sync team overtime in real time.")
+            appendLine()
+            appendLine("🌐 Open in Browser (Android / iOS / Desktop):")
+            appendLine(browserUrl)
+            if (profile.isConnectedToCompany) {
+                appendLine()
+                val companyDisplay = profile.companyName.ifBlank { profile.companyCode }
+                appendLine("🏢 Company: *$companyDisplay*")
+                appendLine("🔑 Company Code: *${profile.companyCode}*")
+                appendLine("Sign in with Google and enter this Company Code in Settings → Profile & Company Sync.")
+            }
+        }.trim()
+    }
+
+    val baseIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, message)
+    }
+
+    // Try standard WhatsApp, then WhatsApp Business, then system share sheet
+    val launchedWhatsApp = listOf("com.whatsapp", "com.whatsapp.w4b").any { pkg ->
+        runCatching {
+            val waIntent = Intent(baseIntent).setPackage(pkg)
+            context.startActivity(waIntent)
+            true
+        }.getOrDefault(false)
+    }
+
+    if (!launchedWhatsApp) {
+        runCatching {
+            context.startActivity(Intent.createChooser(baseIntent, chooserTitle))
         }
     }
 }
@@ -336,7 +425,7 @@ private fun OvertimeBottomNavBar(
     isTimerRunning: Boolean,
     dashboardLabel: String,
     addLabel: String,
-    settingsLabel: String,
+    membersLabel: String,
     onSelectTab: (MainNavTab) -> Unit
 ) {
     Surface(
@@ -406,14 +495,14 @@ private fun OvertimeBottomNavBar(
             }
 
             BottomNavTabItem(
-                selected = activeTab == MainNavTab.SETTINGS,
-                label = settingsLabel,
-                selectedIcon = Icons.Rounded.Settings,
-                unselectedIcon = Icons.Outlined.Settings,
-                onClick = { onSelectTab(MainNavTab.SETTINGS) },
+                selected = activeTab == MainNavTab.MEMBERS,
+                label = membersLabel,
+                selectedIcon = Icons.Rounded.Groups,
+                unselectedIcon = Icons.Outlined.Groups,
+                onClick = { onSelectTab(MainNavTab.MEMBERS) },
                 modifier = Modifier
                     .weight(1f)
-                    .testTag("nav_settings_button")
+                    .testTag("nav_members_button")
             )
         }
     }

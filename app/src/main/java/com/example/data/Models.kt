@@ -97,10 +97,14 @@ data class CompanyDoc(
     val companyCode: String = "",
     val companyName: String = "",
     val adminUid: String = "",
+    val adminUids: List<String> = emptyList(),
     val adminName: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
-)
+) {
+    fun effectiveAdminUids(): List<String> =
+        (listOf(adminUid) + adminUids).filter { it.isNotBlank() }.distinct()
+}
 
 @Keep
 @IgnoreExtraProperties
@@ -160,13 +164,19 @@ data class UserProfile(
     val role: UserRole = UserRole.EMPLOYEE,
     val companyName: String = "",
     val companyCode: String = "",
-    val connectedAdminUid: String = ""
+    val connectedAdminUid: String = "",
+    val connectedAdminUids: List<String> = emptyList()
 ) {
     val isConnectedToCompany: Boolean
         get() = mode == AppMode.GROUP && companyCode.isNotBlank() && connectedAdminUid.isNotBlank()
 
+    fun isAdminUser(uid: String): Boolean =
+        uid.isNotBlank() && (connectedAdminUid == uid || uid in connectedAdminUids)
+
     companion object {
         const val DEFAULT_COMPANY_CODE = "PTMAJU-882"
+        const val MAX_ADMINS = 8
+        const val BROWSER_APP_URL = "https://ais-pre-edudyto27pemjpusprz25i-1008478148900.asia-east1.run.app"
     }
 }
 

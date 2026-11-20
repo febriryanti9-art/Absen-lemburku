@@ -76,6 +76,7 @@ import com.example.ui.TeamFilter
 import com.example.ui.components.ConnectionStatusBadge
 import com.example.ui.components.OvertimeEntryCard
 import com.example.ui.components.QrCodeScannerDialog
+import com.example.ui.components.TopRightSettingsButton
 import com.example.ui.theme.AmberAccent
 import com.example.ui.theme.EmeraldTeal
 import com.example.ui.theme.EmeraldTealDark
@@ -98,6 +99,7 @@ fun DashboardScreen(
     onApproveTeamEntry: (String) -> Unit,
     onRejectTeamEntry: (String) -> Unit,
     onCopyCompanyCode: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenSettingsToConnect: () -> Unit,
     onScanQrToJoin: (String) -> Unit,
     onDismissNewMemberAlert: () -> Unit,
@@ -148,10 +150,19 @@ fun DashboardScreen(
                                 color = MaterialTheme.colorScheme.onBackground
                             )
                         }
-                        ConnectionStatusBadge(
-                            isOnline = state.isOnline,
-                            strings = strings
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ConnectionStatusBadge(
+                                isOnline = state.isOnline,
+                                strings = strings
+                            )
+                            TopRightSettingsButton(
+                                contentDescription = strings.navSettings,
+                                onClick = onOpenSettings
+                            )
+                        }
                     }
 
                     // Active Mode Pill Badge + Real-Time Sync Indicator
@@ -526,7 +537,7 @@ fun DashboardScreen(
                     items(state.myEntries.take(20), key = { it.id }) { entry ->
                         val canDelete = entry.personal ||
                             entry.status == OvertimeStatus.PENDING ||
-                            entry.adminUid == state.currentUserId
+                            state.profile.isAdminUser(state.currentUserId)
                         OvertimeEntryCard(
                             entry = entry,
                             strings = strings,

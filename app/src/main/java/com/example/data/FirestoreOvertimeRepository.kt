@@ -138,7 +138,6 @@ class FirestoreOvertimeRepository(
         emitAll(
             db.collection("companies").document(companyCode)
                 .collection("overtime_entries")
-                .whereEqualTo("adminUid", adminUid)
                 .snapshots()
                 .map { snap ->
                     snap.toObjects(CompanyOvertimeDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
@@ -152,8 +151,8 @@ class FirestoreOvertimeRepository(
         )
     }
 
-    fun observeCompanyMembersForAdmin(companyCode: String, adminUid: String): Flow<List<CompanyMemberDoc>> = flow {
-        if (!isValidCompanyCode(companyCode) || adminUid.isBlank()) {
+    fun observeCompanyMembers(companyCode: String, userId: String): Flow<List<CompanyMemberDoc>> = flow {
+        if (!isValidCompanyCode(companyCode) || userId.isBlank()) {
             emit(emptyList())
             return@flow
         }
@@ -161,14 +160,16 @@ class FirestoreOvertimeRepository(
         emitAll(
             db.collection("companies").document(companyCode)
                 .collection("members")
-                .whereEqualTo("adminUid", adminUid)
                 .snapshots()
                 .map { snap ->
                     snap.toObjects(CompanyMemberDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                        .sortedBy { it.employeeName.lowercase() }
+                        .sortedWith(
+                            compareByDescending<CompanyMemberDoc> { it.role == UserRole.ADMIN.key }
+                                .thenBy { it.employeeName.lowercase() }
+                        )
                 }
                 .catch { error ->
-                    logStreamErrorIfSignedIn(error, OperationType.LIST, path, adminUid)
+                    logStreamErrorIfSignedIn(error, OperationType.LIST, path, userId)
                     throw error
                 }
         )
@@ -254,24 +255,34 @@ class FirestoreOvertimeRepository(
             val companyRef = db.collection("companies").document(code)
             path = companyRef.path
             val existingSnap = companyRef.get().await()
+            val primaryAdminUid: String
+            val finalAdminUids: List<String>
+
             if (existingSnap.exists()) {
                 val existingCompany = existingSnap.toObject(CompanyDoc::class.java)
-                if (existingCompany != null && existingCompany.adminUid != uid) {
+                val existingAdmins = existingCompany?.effectiveAdminUids().orEmpty()
+                if (existingCompany != null && uid !in existingAdmins) {
                     return Result.failure(IllegalStateException("CODE_OWNED_BY_OTHER_ADMIN"))
                 }
+                primaryAdminUid = existingCompany?.adminUid?.ifBlank { uid } ?: uid
+                finalAdminUids = (existingAdmins + uid).distinct().take(UserProfile.MAX_ADMINS)
                 companyRef.update(
                     mapOf(
                         "companyName" to safeCompanyName,
-                        "adminName" to safeName,
+                        "adminName" to if (uid == primaryAdminUid) safeName else existingCompany?.adminName.orEmpty().ifBlank { safeName },
+                        "adminUids" to finalAdminUids,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
             } else {
+                primaryAdminUid = uid
+                finalAdminUids = listOf(uid)
                 companyRef.set(
                     mapOf(
                         "companyCode" to code,
                         "companyName" to safeCompanyName,
                         "adminUid" to uid,
+                        "adminUids" to finalAdminUids,
                         "adminName" to safeName,
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -297,7 +308,7 @@ class FirestoreOvertimeRepository(
                         "userId" to uid,
                         "employeeName" to safeName,
                         "companyCode" to code,
-                        "adminUid" to uid,
+                        "adminUid" to primaryAdminUid,
                         "role" to UserRole.ADMIN.key,
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -321,7 +332,8 @@ class FirestoreOvertimeRepository(
                     id = code,
                     companyCode = code,
                     companyName = safeCompanyName,
-                    adminUid = uid,
+                    adminUid = primaryAdminUid,
+                    adminUids = finalAdminUids,
                     adminName = safeName
                 )
             )
@@ -329,6 +341,100 @@ class FirestoreOvertimeRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun promoteMemberToAdmin(
+        companyCode: String,
+        targetMemberUid: String
+    ): Result<Unit> {
+        val code = normalizeCompanyCode(companyCode)
+        var path = "companies/$code"
+        return try {
+            requireUserId()
+            require(isValidCompanyCode(code) && targetMemberUid.isNotBlank())
+            val companyRef = db.collection("companies").document(code)
+            val companySnap = companyRef.get().await()
+            val company = companySnap.toObject(CompanyDoc::class.java)
+                ?: return Result.failure(IllegalStateException("COMPANY_NOT_FOUND"))
+
+            val currentAdmins = company.effectiveAdminUids()
+            if (targetMemberUid in currentAdmins) return Result.success(Unit)
+            if (currentAdmins.size >= UserProfile.MAX_ADMINS) {
+                return Result.failure(IllegalStateException("ADMIN_LIMIT_REACHED"))
+            }
+
+            val updatedAdmins = (currentAdmins + targetMemberUid).distinct()
+            val memberRef = companyRef.collection("members").document(targetMemberUid)
+            path = memberRef.path
+            val batch = db.batch()
+            batch.update(
+                companyRef,
+                mapOf(
+                    "adminUids" to updatedAdmins,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.update(
+                memberRef,
+                mapOf(
+                    "role" to UserRole.ADMIN.key,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun demoteAdminToMember(
+        companyCode: String,
+        targetMemberUid: String
+    ): Result<Unit> {
+        val code = normalizeCompanyCode(companyCode)
+        var path = "companies/$code"
+        return try {
+            requireUserId()
+            require(isValidCompanyCode(code) && targetMemberUid.isNotBlank())
+            val companyRef = db.collection("companies").document(code)
+            val companySnap = companyRef.get().await()
+            val company = companySnap.toObject(CompanyDoc::class.java)
+                ?: return Result.failure(IllegalStateException("COMPANY_NOT_FOUND"))
+
+            if (targetMemberUid == company.adminUid) {
+                return Result.failure(IllegalStateException("CANNOT_DEMOTE_PRIMARY_ADMIN"))
+            }
+
+            val updatedAdmins = company.effectiveAdminUids().filterNot { it == targetMemberUid }
+            val memberRef = companyRef.collection("members").document(targetMemberUid)
+            path = memberRef.path
+            val batch = db.batch()
+            batch.update(
+                companyRef,
+                mapOf(
+                    "adminUids" to updatedAdmins,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.update(
+                memberRef,
+                mapOf(
+                    "role" to UserRole.EMPLOYEE.key,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
             Result.failure(e)
         }
     }
@@ -467,7 +573,7 @@ class FirestoreOvertimeRepository(
             val safeName = employeeName.trim().ifBlank { "Karyawan" }.take(60)
             val safeDuration = durationMinutes.coerceIn(1, 1440).toLong()
             val safeNotes = notes.trim().take(500)
-            val initialStatus = if (isAdminSelf && adminUid == uid) {
+            val initialStatus = if (isAdminSelf) {
                 OvertimeStatus.APPROVED.key
             } else {
                 OvertimeStatus.PENDING.key
@@ -483,7 +589,7 @@ class FirestoreOvertimeRepository(
                         "employeeName" to safeName,
                         "companyCode" to code,
                         "adminUid" to adminUid,
-                        "role" to if (adminUid == uid) UserRole.ADMIN.key else UserRole.EMPLOYEE.key,
+                        "role" to if (isAdminSelf) UserRole.ADMIN.key else UserRole.EMPLOYEE.key,
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )

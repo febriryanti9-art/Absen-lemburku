@@ -21,10 +21,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
@@ -63,6 +65,7 @@ import com.example.ui.theme.StatusRejected
 private enum class ActiveSettingsModal {
     NONE,
     PROFILE,
+    BROWSER_LINK,
     THEME_LANGUAGE,
     TUTORIAL,
     ABOUT
@@ -82,6 +85,8 @@ fun SettingsScreen(
     ) -> Unit,
     onSelectTheme: (AppThemeMode) -> Unit,
     onSelectLanguage: (AppLanguage) -> Unit,
+    onShareBrowserLinkWhatsApp: () -> Unit,
+    onBrowserLinkCopied: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -121,26 +126,50 @@ fun SettingsScreen(
             contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header
+            // Header with Back Button
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = strings.settingsTitle,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = strings.settingsSubtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            onClick = onNavigateBack,
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f)),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("settings_back_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = strings.backButtonDesc,
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = strings.settingsTitle,
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = strings.settingsSubtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     ConnectionStatusBadge(isOnline = state.isOnline, strings = strings)
@@ -244,6 +273,18 @@ fun SettingsScreen(
                 )
             }
 
+            // 2. Link Browser (Web / iOS) + Share ke WhatsApp
+            item {
+                SettingsClickableCard(
+                    icon = Icons.Rounded.Language,
+                    iconTint = Color(0xFF16A34A),
+                    title = strings.cardBrowserLinkTitle,
+                    subtitle = strings.cardBrowserLinkSubtitle,
+                    onClick = { activeModal = ActiveSettingsModal.BROWSER_LINK },
+                    modifier = Modifier.testTag("settings_card_browser_link")
+                )
+            }
+
             // 2. Tema & Bahasa
             item {
                 SettingsClickableCard(
@@ -296,6 +337,15 @@ fun SettingsScreen(
                         }
                     }
                 }
+            )
+        }
+        ActiveSettingsModal.BROWSER_LINK -> {
+            BrowserLinkModal(
+                profile = profile,
+                strings = strings,
+                onShareWhatsApp = onShareBrowserLinkWhatsApp,
+                onLinkCopied = onBrowserLinkCopied,
+                onDismiss = { activeModal = ActiveSettingsModal.NONE }
             )
         }
         ActiveSettingsModal.THEME_LANGUAGE -> {

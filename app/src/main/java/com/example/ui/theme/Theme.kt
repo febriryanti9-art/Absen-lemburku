@@ -7,9 +7,12 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
@@ -85,10 +88,15 @@ fun OvertimeTrackerTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        shapes = OvertimeShapes,
-        content = content
-    )
+    val currentDensity = LocalDensity.current
+    val lockedDensity = Density(density = currentDensity.density, fontScale = 1.0f)
+
+    CompositionLocalProvider(LocalDensity provides lockedDensity) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            shapes = OvertimeShapes,
+            content = content
+        )
+    }
 }

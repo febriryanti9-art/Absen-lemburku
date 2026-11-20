@@ -327,3 +327,133 @@ test("Real-time Company flow: Admin creates company, Employee joins & submits, A
     })
   );
 });
+
+test("Multi-Admin (max 8 admins) & Unlimited Member Roster rules", async () => {
+  const adminDb = testEnv.authenticatedContext(ADMIN_UID).firestore();
+  const coAdminUid = "coadmin_uid_004";
+  const coAdminDb = testEnv.authenticatedContext(coAdminUid).firestore();
+  const empDb = testEnv.authenticatedContext(EMPLOYEE_UID).firestore();
+  const outsiderDb = testEnv.authenticatedContext(OUTSIDER_UID).firestore();
+  const ts = pastDate(8000);
+
+  // Create company with adminUids list
+  await assertSucceeds(
+    adminDb.collection("companies").doc(COMPANY_CODE).set({
+      companyCode: COMPANY_CODE,
+      companyName: "PT Absen Lemburku",
+      adminUid: ADMIN_UID,
+      adminUids: [ADMIN_UID],
+      adminName: "Admin 1",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    adminDb.collection("companies").doc(COMPANY_CODE).collection("members").doc(ADMIN_UID).set({
+      userId: ADMIN_UID,
+      employeeName: "Admin 1",
+      companyCode: COMPANY_CODE,
+      adminUid: ADMIN_UID,
+      role: "ADMIN",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Co-admin and employee join as EMPLOYEE first
+  await assertSucceeds(
+    coAdminDb.collection("companies").doc(COMPANY_CODE).collection("members").doc(coAdminUid).set({
+      userId: coAdminUid,
+      employeeName: "Siti CoAdmin",
+      companyCode: COMPANY_CODE,
+      adminUid: ADMIN_UID,
+      role: "EMPLOYEE",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    empDb.collection("companies").doc(COMPANY_CODE).collection("members").doc(EMPLOYEE_UID).set({
+      userId: EMPLOYEE_UID,
+      employeeName: "Budi Anggota",
+      companyCode: COMPANY_CODE,
+      adminUid: ADMIN_UID,
+      role: "EMPLOYEE",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Connected employee can list company member roster; outsider is blocked
+  await assertSucceeds(
+    empDb.collection("companies").doc(COMPANY_CODE).collection("members").get()
+  );
+  await assertFails(
+    outsiderDb.collection("companies").doc(COMPANY_CODE).collection("members").get()
+  );
+
+  // Primary admin promotes Siti to Co-Admin (2 admins total)
+  await assertSucceeds(
+    adminDb.collection("companies").doc(COMPANY_CODE).update({
+      adminUids: [ADMIN_UID, coAdminUid],
+      updatedAt: pastDate(2000),
+    })
+  );
+  await assertSucceeds(
+    adminDb.collection("companies").doc(COMPANY_CODE).collection("members").doc(coAdminUid).update({
+      role: "ADMIN",
+      updatedAt: pastDate(2000),
+    })
+  );
+
+  // 8 admins allowed; 9th admin strictly rejected
+  await assertSucceeds(
+    adminDb.collection("companies").doc(COMPANY_CODE).update({
+      adminUids: [ADMIN_UID, coAdminUid, "a3", "a4", "a5", "a6", "a7", "a8"],
+      updatedAt: pastDate(1500),
+    })
+  );
+  await assertFails(
+    adminDb.collection("companies").doc(COMPANY_CODE).update({
+      adminUids: [ADMIN_UID, coAdminUid, "a3", "a4", "a5", "a6", "a7", "a8", "a9"],
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  // Employee submits overtime; Co-Admin can list & approve it
+  await assertSucceeds(
+    empDb.collection("companies").doc(COMPANY_CODE).collection("overtime_entries").doc("e_multi").set({
+      userId: EMPLOYEE_UID,
+      employeeName: "Budi Anggota",
+      companyCode: COMPANY_CODE,
+      adminUid: ADMIN_UID,
+      dateIso: "2026-11-19",
+      startTime: "18:00",
+      endTime: "20:00",
+      durationMinutes: 120,
+      overnight: false,
+      notes: "Lembur tim",
+      status: "PENDING",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    coAdminDb.collection("companies").doc(COMPANY_CODE).collection("overtime_entries").get()
+  );
+  await assertSucceeds(
+    coAdminDb.collection("companies").doc(COMPANY_CODE).collection("overtime_entries").doc("e_multi").update({
+      status: "APPROVED",
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Co-admin CANNOT demote primary owner adminUid
+  await assertFails(
+    coAdminDb.collection("companies").doc(COMPANY_CODE).collection("members").doc(ADMIN_UID).update({
+      role: "EMPLOYEE",
+      updatedAt: pastDate(400),
+    })
+  );
+});
+

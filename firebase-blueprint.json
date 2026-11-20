@@ -42,7 +42,8 @@
       "properties": {
         "companyCode": { "type": "string", "description": "Unique uppercase company code (3-24 chars)" },
         "companyName": { "type": "string", "description": "Company display name (1-80 chars)" },
-        "adminUid": { "type": "string", "description": "Firebase Auth UID of the company Admin" },
+        "adminUid": { "type": "string", "description": "Firebase Auth UID of the primary company Admin" },
+        "adminUids": { "type": "array", "items": { "type": "string" }, "description": "List of 1 to 8 company Admin UIDs including primary adminUid" },
         "adminName": { "type": "string", "description": "Display name of the company Admin (1-60 chars)" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" }

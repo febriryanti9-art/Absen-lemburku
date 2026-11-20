@@ -79,6 +79,7 @@ import com.example.data.AppMode
 import com.example.data.UserRole
 import com.example.ui.OvertimeUiState
 import com.example.ui.components.ConnectionStatusBadge
+import com.example.ui.components.TopRightSettingsButton
 import com.example.ui.theme.AmberAccent
 import com.example.ui.theme.EmeraldTeal
 import com.example.ui.theme.EmeraldTealDark
@@ -106,6 +107,7 @@ private data class TimePreset(
 fun AddOvertimeScreen(
     state: OvertimeUiState,
     onNavigateBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     onStartLiveTimer: () -> Unit,
     onCancelLiveTimer: () -> Unit,
     onStopAndSaveLiveTimer: (notes: String) -> Unit,
@@ -191,7 +193,16 @@ fun AddOvertimeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    ConnectionStatusBadge(isOnline = state.isOnline, strings = strings)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ConnectionStatusBadge(isOnline = state.isOnline, strings = strings)
+                        TopRightSettingsButton(
+                            contentDescription = strings.navSettings,
+                            onClick = onOpenSettings
+                        )
+                    }
                 }
             }
 
@@ -825,7 +836,7 @@ fun AddOvertimeScreen(
             item {
                 val modeNotice = when {
                     profile.mode == AppMode.PERSONAL -> strings.savePersonalNotice
-                    profile.role == UserRole.ADMIN && profile.connectedAdminUid == state.currentUserId -> strings.saveAdminNotice
+                    profile.isAdminUser(state.currentUserId) -> strings.saveAdminNotice
                     else -> strings.saveEmployeeNotice
                 }
                 Surface(

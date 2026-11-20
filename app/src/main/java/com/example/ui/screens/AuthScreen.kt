@@ -105,22 +105,27 @@ fun AuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Branded Header Emblem
-            Box(
-                modifier = Modifier
-                    .size(96.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(
-                        Brush.linearGradient(listOf(EmeraldTealDark, EmeraldTeal))
-                    ),
-                contentAlignment = Alignment.Center
+            // Branded Header Emblem (unclipped)
+            Surface(
+                modifier = Modifier.size(110.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = Color(0xFFF5FBFB),
+                border = BorderStroke(2.dp, EmeraldTeal.copy(alpha = 0.25f)),
+                shadowElevation = 4.dp
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_overtime_logo_1795100061932),
-                    contentDescription = "Overtime Tracker Logo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_absen_lemburku_logo),
+                        contentDescription = "Absen Lemburku Logo",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
 
             Column(
@@ -256,7 +261,7 @@ fun AuthScreen(
             }
 
             Text(
-                text = "Overtime Tracker v1.0 • rafline dev",
+                text = "Absen Lemburku v1.0 • by Rafline Dev",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

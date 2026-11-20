@@ -40,6 +40,21 @@ service cloud.firestore {
       return val is timestamp && val <= request.time;
     }
 
+    // Multi-Admin helpers (supports primary owner + up to 8 Admins total, backward-compatible with legacy single-admin docs)
+    function isCompanyAdminData(companyData, uid) {
+      return companyData.adminUid == uid ||
+             ('adminUids' in companyData && companyData.adminUids is list && uid in companyData.adminUids);
+    }
+
+    function isCompanyAdmin(companyCode, uid) {
+      return exists(/databases/$(database)/documents/companies/$(companyCode)) &&
+             isCompanyAdminData(get(/databases/$(database)/documents/companies/$(companyCode)).data, uid);
+    }
+
+    function isCompanyMember(companyCode, uid) {
+      return exists(/databases/$(database)/documents/companies/$(companyCode)/members/$(uid));
+    }
+
     // --- Entity Validation Blueprints ---
     function isValidUserProfile(data) {
       return data.keys().hasAll(['userId', 'displayName', 'mode', 'role', 'companyName', 'companyCode', 'createdAt', 'updatedAt']) &&
@@ -73,10 +88,19 @@ service cloud.firestore {
 
     function isValidCompany(data) {
       return data.keys().hasAll(['companyCode', 'companyName', 'adminUid', 'adminName', 'createdAt', 'updatedAt']) &&
-             data.keys().hasOnly(['companyCode', 'companyName', 'adminUid', 'adminName', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['companyCode', 'companyName', 'adminUid', 'adminUids', 'adminName', 'createdAt', 'updatedAt']) &&
              isValidCompanyCode(data.companyCode) &&
              data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 80 &&
              data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+             (
+               !('adminUids' in data) ||
+               (
+                 data.adminUids is list &&
+                 data.adminUids.size() >= 1 &&
+                 data.adminUids.size() <= 8 &&
+                 data.adminUid in data.adminUids
+               )
+             ) &&
              data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 60 &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
@@ -159,7 +183,7 @@ service cloud.firestore {
       }
     }
 
-    // 2. Companies & Real-Time Team Overtime Subcollections
+    // 2. Companies & Real-Time Team Overtime Subcollections (Multi-Admin 1..8, Unlimited Members)
     match /companies/{companyCode} {
       // Exact code lookup allows employees to verify & join a company by code; listing all companies is forbidden.
       allow get: if isSignedIn() && isValidCompanyCode(companyCode);
@@ -174,11 +198,11 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidCompanyCode(companyCode) &&
                        isValidCompany(incoming()) &&
-                       existing().adminUid == request.auth.uid &&
+                       isCompanyAdminData(existing(), request.auth.uid) &&
                        incoming().companyCode == existing().companyCode &&
                        incoming().adminUid == existing().adminUid &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'adminName', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'adminName', 'adminUids', 'updatedAt']);
 
       allow delete: if isSignedIn() &&
                        isValidCompanyCode(companyCode) &&
@@ -188,11 +212,12 @@ service cloud.firestore {
         allow get: if isSignedIn() &&
                       isValidCompanyCode(companyCode) &&
                       isValidId(memberId) &&
-                      (request.auth.uid == memberId || existing().adminUid == request.auth.uid);
+                      (request.auth.uid == memberId || isCompanyMember(companyCode, request.auth.uid));
 
-        // Zero-lookup list query: Admin queries .whereEqualTo("adminUid", uid), member queries .whereEqualTo("userId", uid)
+        // Connected company members (both Admins & Employees) can view the company member roster; outsiders are denied.
         allow list: if isSignedIn() &&
-                       (existing().adminUid == request.auth.uid || existing().userId == request.auth.uid);
+                       isValidCompanyCode(companyCode) &&
+                       (isCompanyMember(companyCode, request.auth.uid) || isCompanyAdmin(companyCode, request.auth.uid));
 
         allow create: if isSignedIn() &&
                          isValidCompanyCode(companyCode) &&
@@ -203,37 +228,50 @@ service cloud.firestore {
                          incoming().companyCode == companyCode &&
                          exists(/databases/$(database)/documents/companies/$(companyCode)) &&
                          incoming().adminUid == get(/databases/$(database)/documents/companies/$(companyCode)).data.adminUid &&
-                         (incoming().role == 'EMPLOYEE' || incoming().adminUid == request.auth.uid);
+                         (incoming().role == 'EMPLOYEE' || isCompanyAdmin(companyCode, request.auth.uid));
 
         allow update: if isSignedIn() &&
                          isValidCompanyCode(companyCode) &&
                          isValidId(memberId) &&
                          isValidCompanyMember(incoming()) &&
-                         request.auth.uid == memberId &&
                          incoming().userId == existing().userId &&
                          incoming().companyCode == existing().companyCode &&
                          incoming().adminUid == existing().adminUid &&
                          incoming().createdAt == existing().createdAt &&
-                         (incoming().role == 'EMPLOYEE' || existing().adminUid == request.auth.uid) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['employeeName', 'role', 'updatedAt']);
+                         (
+                           // Member updates own profile (no self-promotion unless already company admin)
+                           (
+                             request.auth.uid == memberId &&
+                             (incoming().role == 'EMPLOYEE' || isCompanyAdmin(companyCode, request.auth.uid)) &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['employeeName', 'role', 'updatedAt'])
+                           ) ||
+                           // Any company Admin promotes/demotes another member (primary owner cannot be demoted)
+                           (
+                             isCompanyAdmin(companyCode, request.auth.uid) &&
+                             memberId != existing().adminUid &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt'])
+                           )
+                         );
 
         allow delete: if isSignedIn() &&
                          isValidCompanyCode(companyCode) &&
                          isValidId(memberId) &&
-                         (request.auth.uid == memberId || existing().adminUid == request.auth.uid);
+                         (
+                           request.auth.uid == memberId ||
+                           (isCompanyAdmin(companyCode, request.auth.uid) && memberId != existing().adminUid)
+                         );
       }
 
       match /overtime_entries/{entryId} {
         allow get: if isSignedIn() &&
                       isValidCompanyCode(companyCode) &&
                       isValidId(entryId) &&
-                      (existing().userId == request.auth.uid || existing().adminUid == request.auth.uid);
+                      (existing().userId == request.auth.uid || isCompanyAdmin(companyCode, request.auth.uid));
 
-        // Zero-lookup list query:
-        // - Employee queries .whereEqualTo("userId", uid)
-        // - Admin queries .whereEqualTo("adminUid", uid)
+        // Employee queries .whereEqualTo("userId", uid); any of the 1..8 Admins can query all company overtime entries.
         allow list: if isSignedIn() &&
-                       (existing().userId == request.auth.uid || existing().adminUid == request.auth.uid);
+                       isValidCompanyCode(companyCode) &&
+                       (existing().userId == request.auth.uid || isCompanyAdmin(companyCode, request.auth.uid));
 
         allow create: if isSignedIn() &&
                          isValidCompanyCode(companyCode) &&
@@ -246,10 +284,10 @@ service cloud.firestore {
                          incoming().adminUid == get(/databases/$(database)/documents/companies/$(companyCode)).data.adminUid &&
                          (
                            (incoming().status == 'PENDING') ||
-                           (incoming().adminUid == request.auth.uid && incoming().status == 'APPROVED')
+                           (isCompanyAdmin(companyCode, request.auth.uid) && incoming().status == 'APPROVED')
                          );
 
-        // Action-based update: Only the company Admin can review (approve/reject) submissions.
+        // Any company Admin (1..8) can review (approve/reject) team submissions.
         allow update: if isSignedIn() &&
                          isValidCompanyCode(companyCode) &&
                          isValidId(entryId) &&
@@ -259,18 +297,18 @@ service cloud.firestore {
                          incoming().adminUid == existing().adminUid &&
                          incoming().createdAt == existing().createdAt &&
                          (
-                           existing().adminUid == request.auth.uid &&
+                           isCompanyAdmin(companyCode, request.auth.uid) &&
                            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
                            incoming().status in ['APPROVED', 'REJECTED']
                          );
 
-        // Employees can delete their own PENDING entries; Company Admin can delete any company entry.
+        // Employees can delete their own PENDING entries; any company Admin can delete any company entry.
         allow delete: if isSignedIn() &&
                          isValidCompanyCode(companyCode) &&
                          isValidId(entryId) &&
                          (
                            (existing().userId == request.auth.uid && existing().status == 'PENDING') ||
-                           existing().adminUid == request.auth.uid
+                           isCompanyAdmin(companyCode, request.auth.uid)
                          );
       }
     }

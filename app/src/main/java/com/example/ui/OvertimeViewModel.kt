@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 enum class MainNavTab {
     DASHBOARD,
     ADD_OVERTIME,
+    MEMBERS,
     SETTINGS
 }
 
@@ -90,9 +91,8 @@ data class OvertimeUiState(
 ) {
     val isAdminGroupMode: Boolean
         get() = profile.mode == AppMode.GROUP &&
-            profile.role == UserRole.ADMIN &&
             profile.companyCode.isNotBlank() &&
-            profile.connectedAdminUid == currentUserId
+            profile.isAdminUser(currentUserId)
 
     val activeOvertimeStartMillis: Long?
         get() = localPrefs.activeOvertimeStartMillis
@@ -107,6 +107,7 @@ data class MemberJoinedEvent(
 
 private data class UiLocalState(
     val activeNavTab: MainNavTab = MainNavTab.DASHBOARD,
+    val previousNavTab: MainNavTab = MainNavTab.DASHBOARD,
     val dashboardSubTab: DashboardSubTab = DashboardSubTab.MY_OVERVIEW,
     val teamFilter: TeamFilter = TeamFilter.ALL,
     val displayedYear: Int = DateTimeUtils.currentYearMonth().first,
@@ -197,8 +198,7 @@ class OvertimeViewModel(
         }.flatMapLatest { (profileDoc, companyDoc) ->
             val code = companyDoc?.companyCode.orEmpty()
             val isRealAdmin = profileDoc?.mode == AppMode.GROUP.key &&
-                profileDoc.role == UserRole.ADMIN.key &&
-                companyDoc?.adminUid == currentUserId &&
+                companyDoc?.effectiveAdminUids()?.contains(currentUserId) == true &&
                 code.isNotBlank()
             if (isRealAdmin) {
                 repository.observeAllCompanyOvertimeForAdmin(code, currentUserId)
@@ -213,12 +213,9 @@ class OvertimeViewModel(
             profileDoc to companyDoc
         }.flatMapLatest { (profileDoc, companyDoc) ->
             val code = companyDoc?.companyCode.orEmpty()
-            val isRealAdmin = profileDoc?.mode == AppMode.GROUP.key &&
-                profileDoc.role == UserRole.ADMIN.key &&
-                companyDoc?.adminUid == currentUserId &&
-                code.isNotBlank()
-            if (isRealAdmin) {
-                repository.observeCompanyMembersForAdmin(code, currentUserId)
+            val isConnectedGroup = profileDoc?.mode == AppMode.GROUP.key && code.isNotBlank()
+            if (isConnectedGroup) {
+                repository.observeCompanyMembers(code, currentUserId)
                     .safeFirestoreStream(emptyList()) { streamErrorFlow.value = it }
             } else {
                 flowOf(emptyList())
@@ -256,7 +253,11 @@ class OvertimeViewModel(
         val cDoc = cloud.companyDoc
 
         val resolvedMode = AppMode.fromKey(pDoc?.mode)
-        val resolvedRole = UserRole.fromKey(pDoc?.role)
+        val effectiveAdminUids = cDoc?.effectiveAdminUids().orEmpty()
+        val isCompanyAdmin = resolvedMode == AppMode.GROUP &&
+            cDoc != null &&
+            currentUserId in effectiveAdminUids
+        val resolvedRole = if (isCompanyAdmin) UserRole.ADMIN else UserRole.fromKey(pDoc?.role)
         val profile = UserProfile(
             name = pDoc?.displayName?.takeIf { it.isNotBlank() }
                 ?: currentUserDisplayName.ifBlank { "Overtime User" },
@@ -266,13 +267,13 @@ class OvertimeViewModel(
             companyName = cDoc?.companyName?.takeIf { it.isNotBlank() }
                 ?: pDoc?.companyName.orEmpty(),
             companyCode = pDoc?.companyCode.orEmpty(),
-            connectedAdminUid = cDoc?.adminUid.orEmpty()
+            connectedAdminUid = cDoc?.adminUid.orEmpty(),
+            connectedAdminUids = effectiveAdminUids
         )
 
         val isAdminGroup = profile.mode == AppMode.GROUP &&
-            profile.role == UserRole.ADMIN &&
             profile.companyCode.isNotBlank() &&
-            profile.connectedAdminUid == currentUserId
+            profile.isAdminUser(currentUserId)
 
         val effectiveSubTab = if (isAdminGroup) local.dashboardSubTab else DashboardSubTab.MY_OVERVIEW
 
@@ -380,8 +381,7 @@ class OvertimeViewModel(
             }.collect { (pDoc, cDoc, members) ->
                 val code = cDoc?.companyCode.orEmpty()
                 val isRealAdmin = pDoc?.mode == AppMode.GROUP.key &&
-                    pDoc.role == UserRole.ADMIN.key &&
-                    cDoc?.adminUid == currentUserId &&
+                    cDoc?.effectiveAdminUids()?.contains(currentUserId) == true &&
                     code.isNotBlank()
 
                 if (!isRealAdmin) {
@@ -454,10 +454,27 @@ class OvertimeViewModel(
     }
 
     fun selectNavTab(tab: MainNavTab) {
-        localState.value = localState.value.copy(
+        val current = localState.value
+        val prev = if (tab == MainNavTab.SETTINGS && current.activeNavTab != MainNavTab.SETTINGS) {
+            current.activeNavTab
+        } else {
+            current.previousNavTab
+        }
+        localState.value = current.copy(
             activeNavTab = tab,
-            draftDateIso = if (tab == MainNavTab.ADD_OVERTIME) DateTimeUtils.todayIsoDate() else localState.value.draftDateIso
+            previousNavTab = prev,
+            draftDateIso = if (tab == MainNavTab.ADD_OVERTIME) DateTimeUtils.todayIsoDate() else current.draftDateIso
         )
+    }
+
+    fun openSettings() {
+        selectNavTab(MainNavTab.SETTINGS)
+    }
+
+    fun navigateBackFromSettings() {
+        val prev = localState.value.previousNavTab
+        val target = if (prev == MainNavTab.SETTINGS) MainNavTab.DASHBOARD else prev
+        localState.value = localState.value.copy(activeNavTab = target)
     }
 
     fun openAddForDate(dateIso: String) {
@@ -588,7 +605,7 @@ class OvertimeViewModel(
                     companyCode = profile.companyCode,
                     adminUid = profile.connectedAdminUid,
                     employeeName = profile.name,
-                    isAdminSelf = profile.role == UserRole.ADMIN && profile.connectedAdminUid == currentUserId,
+                    isAdminSelf = profile.isAdminUser(currentUserId),
                     dateIso = dateIso,
                     startTime = startTime,
                     endTime = endTime,
@@ -613,7 +630,7 @@ class OvertimeViewModel(
                 )
                 val msg = when {
                     profile.mode == AppMode.PERSONAL -> strings.savedSuccessPersonal
-                    profile.role == UserRole.ADMIN && profile.connectedAdminUid == currentUserId -> strings.savedSuccessAdmin
+                    profile.isAdminUser(currentUserId) -> strings.savedSuccessAdmin
                     else -> strings.savedSuccessPending
                 }
                 _snackbarEvents.tryEmit(msg)
@@ -651,6 +668,46 @@ class OvertimeViewModel(
             repository.reviewCompanyOvertime(code, entryId, OvertimeStatus.REJECTED)
                 .onSuccess { _snackbarEvents.tryEmit(state.strings.rejectedFeedback) }
                 .onFailure { err -> _snackbarEvents.tryEmit(err.localizedMessage ?: state.strings.errGenericSave) }
+        }
+    }
+
+    fun promoteMemberToAdmin(targetUid: String) {
+        val state = uiState.value
+        val code = state.profile.companyCode
+        if (!state.isAdminGroupMode || code.isBlank()) return
+        viewModelScope.launch {
+            localState.value = localState.value.copy(isBusy = true)
+            val result = repository.promoteMemberToAdmin(code, targetUid)
+            localState.value = localState.value.copy(isBusy = false)
+            result.onSuccess {
+                _snackbarEvents.tryEmit(state.strings.promotedToAdminMsg)
+            }.onFailure { err ->
+                val msg = when (err.message) {
+                    "ADMIN_LIMIT_REACHED" -> state.strings.errAdminLimitReached
+                    else -> err.localizedMessage ?: state.strings.errGenericSave
+                }
+                _snackbarEvents.tryEmit(msg)
+            }
+        }
+    }
+
+    fun demoteAdminToMember(targetUid: String) {
+        val state = uiState.value
+        val code = state.profile.companyCode
+        if (!state.isAdminGroupMode || code.isBlank()) return
+        viewModelScope.launch {
+            localState.value = localState.value.copy(isBusy = true)
+            val result = repository.demoteAdminToMember(code, targetUid)
+            localState.value = localState.value.copy(isBusy = false)
+            result.onSuccess {
+                _snackbarEvents.tryEmit(state.strings.demotedToMemberMsg)
+            }.onFailure { err ->
+                val msg = when (err.message) {
+                    "CANNOT_DEMOTE_PRIMARY_ADMIN" -> state.strings.errCannotDemotePrimaryAdmin
+                    else -> err.localizedMessage ?: state.strings.errGenericSave
+                }
+                _snackbarEvents.tryEmit(msg)
+            }
         }
     }
 
