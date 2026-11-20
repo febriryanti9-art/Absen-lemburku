@@ -1,0 +1,6 @@
+{
+  "name": "Overtime Tracker",
+  "description": "Pencatat jam lembur modern dengan mode Pribadi & Kelompok, kalender interaktif, kalkulasi real-time lintas hari, ekspor CSV, dan penyimpanan offline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

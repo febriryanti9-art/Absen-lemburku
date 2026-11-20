@@ -1,0 +1,278 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidCompanyCode(code) {
+      return code is string && code.size() >= 3 && code.size() <= 24 && code.matches('^[A-Z0-9][A-Z0-9_\\-]+$');
+    }
+
+    function isValidDateIso(val) {
+      return val is string && val.size() == 10 && val.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isValidTime24(val) {
+      return val is string && val.size() == 5 && val.matches('^[0-2][0-9]:[0-5][0-9]$');
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp && val <= request.time;
+    }
+
+    // --- Entity Validation Blueprints ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['userId', 'displayName', 'mode', 'role', 'companyName', 'companyCode', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['userId', 'displayName', 'mode', 'role', 'companyName', 'companyCode', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             data.mode in ['PERSONAL', 'GROUP'] &&
+             data.role in ['EMPLOYEE', 'ADMIN'] &&
+             data.companyName is string && data.companyName.size() <= 80 &&
+             data.companyCode is string && data.companyCode.size() <= 24 &&
+             (data.companyCode == '' || isValidCompanyCode(data.companyCode)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPersonalOvertime(data) {
+      return data.keys().hasAll(['userId', 'employeeName', 'dateIso', 'startTime', 'endTime', 'durationMinutes', 'overnight', 'notes', 'status', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['userId', 'employeeName', 'dateIso', 'startTime', 'endTime', 'durationMinutes', 'overnight', 'notes', 'status', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() >= 1 && data.employeeName.size() <= 60 &&
+             isValidDateIso(data.dateIso) &&
+             isValidTime24(data.startTime) &&
+             isValidTime24(data.endTime) &&
+             data.durationMinutes is int && data.durationMinutes >= 1 && data.durationMinutes <= 1440 &&
+             data.overnight is bool &&
+             data.notes is string && data.notes.size() <= 500 &&
+             data.status == 'APPROVED' &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCompany(data) {
+      return data.keys().hasAll(['companyCode', 'companyName', 'adminUid', 'adminName', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['companyCode', 'companyName', 'adminUid', 'adminName', 'createdAt', 'updatedAt']) &&
+             isValidCompanyCode(data.companyCode) &&
+             data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 80 &&
+             data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+             data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 60 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCompanyMember(data) {
+      return data.keys().hasAll(['userId', 'employeeName', 'companyCode', 'adminUid', 'role', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['userId', 'employeeName', 'companyCode', 'adminUid', 'role', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() >= 1 && data.employeeName.size() <= 60 &&
+             isValidCompanyCode(data.companyCode) &&
+             data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+             data.role in ['ADMIN', 'EMPLOYEE'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCompanyOvertime(data) {
+      return data.keys().hasAll(['userId', 'employeeName', 'companyCode', 'adminUid', 'dateIso', 'startTime', 'endTime', 'durationMinutes', 'overnight', 'notes', 'status', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['userId', 'employeeName', 'companyCode', 'adminUid', 'dateIso', 'startTime', 'endTime', 'durationMinutes', 'overnight', 'notes', 'status', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() >= 1 && data.employeeName.size() <= 60 &&
+             isValidCompanyCode(data.companyCode) &&
+             data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+             isValidDateIso(data.dateIso) &&
+             isValidTime24(data.startTime) &&
+             isValidTime24(data.endTime) &&
+             data.durationMinutes is int && data.durationMinutes >= 1 && data.durationMinutes <= 1440 &&
+             data.overnight is bool &&
+             data.notes is string && data.notes.size() <= 500 &&
+             data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    // --- Collection Rules ---
+
+    // 1. User Profiles & Personal Overtime Subcollection
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().userId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming()) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'mode', 'role', 'companyName', 'companyCode', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      match /personal_overtime/{entryId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(entryId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(entryId) &&
+                         request.auth.uid == userId &&
+                         isValidPersonalOvertime(incoming()) &&
+                         incoming().userId == request.auth.uid;
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(entryId) &&
+                         isValidPersonalOvertime(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['employeeName', 'dateIso', 'startTime', 'endTime', 'durationMinutes', 'overnight', 'notes', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(entryId) && request.auth.uid == userId;
+      }
+    }
+
+    // 2. Companies & Real-Time Team Overtime Subcollections
+    match /companies/{companyCode} {
+      // Exact code lookup allows employees to verify & join a company by code; listing all companies is forbidden.
+      allow get: if isSignedIn() && isValidCompanyCode(companyCode);
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidCompanyCode(companyCode) &&
+                       isValidCompany(incoming()) &&
+                       incoming().companyCode == companyCode &&
+                       incoming().adminUid == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+                       isValidCompanyCode(companyCode) &&
+                       isValidCompany(incoming()) &&
+                       existing().adminUid == request.auth.uid &&
+                       incoming().companyCode == existing().companyCode &&
+                       incoming().adminUid == existing().adminUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'adminName', 'updatedAt']);
+
+      allow delete: if isSignedIn() &&
+                       isValidCompanyCode(companyCode) &&
+                       existing().adminUid == request.auth.uid;
+
+      match /members/{memberId} {
+        allow get: if isSignedIn() &&
+                      isValidCompanyCode(companyCode) &&
+                      isValidId(memberId) &&
+                      (request.auth.uid == memberId || existing().adminUid == request.auth.uid);
+
+        // Zero-lookup list query: Admin queries .whereEqualTo("adminUid", uid), member queries .whereEqualTo("userId", uid)
+        allow list: if isSignedIn() &&
+                       (existing().adminUid == request.auth.uid || existing().userId == request.auth.uid);
+
+        allow create: if isSignedIn() &&
+                         isValidCompanyCode(companyCode) &&
+                         isValidId(memberId) &&
+                         isValidCompanyMember(incoming()) &&
+                         request.auth.uid == memberId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().companyCode == companyCode &&
+                         exists(/databases/$(database)/documents/companies/$(companyCode)) &&
+                         incoming().adminUid == get(/databases/$(database)/documents/companies/$(companyCode)).data.adminUid &&
+                         (incoming().role == 'EMPLOYEE' || incoming().adminUid == request.auth.uid);
+
+        allow update: if isSignedIn() &&
+                         isValidCompanyCode(companyCode) &&
+                         isValidId(memberId) &&
+                         isValidCompanyMember(incoming()) &&
+                         request.auth.uid == memberId &&
+                         incoming().userId == existing().userId &&
+                         incoming().companyCode == existing().companyCode &&
+                         incoming().adminUid == existing().adminUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         (incoming().role == 'EMPLOYEE' || existing().adminUid == request.auth.uid) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['employeeName', 'role', 'updatedAt']);
+
+        allow delete: if isSignedIn() &&
+                         isValidCompanyCode(companyCode) &&
+                         isValidId(memberId) &&
+                         (request.auth.uid == memberId || existing().adminUid == request.auth.uid);
+      }
+
+      match /overtime_entries/{entryId} {
+        allow get: if isSignedIn() &&
+                      isValidCompanyCode(companyCode) &&
+                      isValidId(entryId) &&
+                      (existing().userId == request.auth.uid || existing().adminUid == request.auth.uid);
+
+        // Zero-lookup list query:
+        // - Employee queries .whereEqualTo("userId", uid)
+        // - Admin queries .whereEqualTo("adminUid", uid)
+        allow list: if isSignedIn() &&
+                       (existing().userId == request.auth.uid || existing().adminUid == request.auth.uid);
+
+        allow create: if isSignedIn() &&
+                         isValidCompanyCode(companyCode) &&
+                         isValidId(entryId) &&
+                         isValidCompanyOvertime(incoming()) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().companyCode == companyCode &&
+                         exists(/databases/$(database)/documents/companies/$(companyCode)) &&
+                         exists(/databases/$(database)/documents/companies/$(companyCode)/members/$(request.auth.uid)) &&
+                         incoming().adminUid == get(/databases/$(database)/documents/companies/$(companyCode)).data.adminUid &&
+                         (
+                           (incoming().status == 'PENDING') ||
+                           (incoming().adminUid == request.auth.uid && incoming().status == 'APPROVED')
+                         );
+
+        // Action-based update: Only the company Admin can review (approve/reject) submissions.
+        allow update: if isSignedIn() &&
+                         isValidCompanyCode(companyCode) &&
+                         isValidId(entryId) &&
+                         isValidCompanyOvertime(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().companyCode == existing().companyCode &&
+                         incoming().adminUid == existing().adminUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           existing().adminUid == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+                           incoming().status in ['APPROVED', 'REJECTED']
+                         );
+
+        // Employees can delete their own PENDING entries; Company Admin can delete any company entry.
+        allow delete: if isSignedIn() &&
+                         isValidCompanyCode(companyCode) &&
+                         isValidId(entryId) &&
+                         (
+                           (existing().userId == request.auth.uid && existing().status == 'PENDING') ||
+                           existing().adminUid == request.auth.uid
+                         );
+      }
+    }
+  }
+}

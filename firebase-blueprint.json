@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "UserProfileDoc": {
+      "title": "UserProfileDoc",
+      "description": "Authenticated user's synced overtime workspace profile",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "User display name (1-60 chars)" },
+        "mode": { "type": "string", "enum": ["PERSONAL", "GROUP"] },
+        "role": { "type": "string", "enum": ["EMPLOYEE", "ADMIN"] },
+        "companyName": { "type": "string", "description": "Connected company name (0-80 chars)" },
+        "companyCode": { "type": "string", "description": "Connected company code (0-24 chars)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "displayName", "mode", "role", "companyName", "companyCode", "createdAt", "updatedAt"]
+    },
+    "PersonalOvertimeDoc": {
+      "title": "PersonalOvertimeDoc",
+      "description": "Personal mode overtime record owned by a single user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID" },
+        "employeeName": { "type": "string", "description": "Owner name (1-60 chars)" },
+        "dateIso": { "type": "string", "description": "ISO date YYYY-MM-DD" },
+        "startTime": { "type": "string", "description": "24h start time HH:mm" },
+        "endTime": { "type": "string", "description": "24h end time HH:mm" },
+        "durationMinutes": { "type": "integer", "description": "Duration in minutes (1-1440)" },
+        "overnight": { "type": "boolean", "description": "True when shift crosses midnight" },
+        "notes": { "type": "string", "description": "Optional work description (0-500 chars)" },
+        "status": { "type": "string", "enum": ["APPROVED"] },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "employeeName", "dateIso", "startTime", "endTime", "durationMinutes", "overnight", "notes", "status", "createdAt", "updatedAt"]
+    },
+    "CompanyDoc": {
+      "title": "CompanyDoc",
+      "description": "Company workspace created by an Admin for real-time team overtime tracking",
+      "type": "object",
+      "properties": {
+        "companyCode": { "type": "string", "description": "Unique uppercase company code (3-24 chars)" },
+        "companyName": { "type": "string", "description": "Company display name (1-80 chars)" },
+        "adminUid": { "type": "string", "description": "Firebase Auth UID of the company Admin" },
+        "adminName": { "type": "string", "description": "Display name of the company Admin (1-60 chars)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" }
+      },
+      "required": ["companyCode", "companyName", "adminUid", "adminName", "createdAt", "updatedAt"]
+    },
+    "CompanyMemberDoc": {
+      "title": "CompanyMemberDoc",
+      "description": "Registered member (Admin or Employee) inside a company workspace",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Member Firebase Auth UID" },
+        "employeeName": { "type": "string", "description": "Member display name (1-60 chars)" },
+        "companyCode": { "type": "string", "description": "Parent company code" },
+        "adminUid": { "type": "string", "description": "Denormalized parent company admin UID" },
+        "role": { "type": "string", "enum": ["ADMIN", "EMPLOYEE"] },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "employeeName", "companyCode", "adminUid", "role", "createdAt", "updatedAt"]
+    },
+    "CompanyOvertimeDoc": {
+      "title": "CompanyOvertimeDoc",
+      "description": "Overtime submission synced in real time between Employee and Company Admin",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Submitting employee Firebase Auth UID" },
+        "employeeName": { "type": "string", "description": "Submitting employee name (1-60 chars)" },
+        "companyCode": { "type": "string", "description": "Parent company code" },
+        "adminUid": { "type": "string", "description": "Denormalized parent company admin UID for zero-lookup rules" },
+        "dateIso": { "type": "string", "description": "ISO date YYYY-MM-DD" },
+        "startTime": { "type": "string", "description": "24h start time HH:mm" },
+        "endTime": { "type": "string", "description": "24h end time HH:mm" },
+        "durationMinutes": { "type": "integer", "description": "Duration in minutes (1-1440)" },
+        "overnight": { "type": "boolean", "description": "True when shift crosses midnight" },
+        "notes": { "type": "string", "description": "Optional work description (0-500 chars)" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "employeeName", "companyCode", "adminUid", "dateIso", "startTime", "endTime", "durationMinutes", "overnight", "notes", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfileDoc" },
+      "description": "User workspace preferences and active mode/company connection"
+    },
+    "/users/{userId}/personal_overtime/{entryId}": {
+      "schema": { "$ref": "#/entities/PersonalOvertimeDoc" },
+      "description": "User-private personal mode overtime entries"
+    },
+    "/companies/{companyCode}": {
+      "schema": { "$ref": "#/entities/CompanyDoc" },
+      "description": "Company workspace anchored by unique uppercase companyCode"
+    },
+    "/companies/{companyCode}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/CompanyMemberDoc" },
+      "description": "Employees and Admin connected to a company workspace"
+    },
+    "/companies/{companyCode}/overtime_entries/{entryId}": {
+      "schema": { "$ref": "#/entities/CompanyOvertimeDoc" },
+      "description": "Company overtime submissions synced live between employees and admin"
+    }
+  }
+}
